@@ -767,7 +767,7 @@ class TestCJKSearchFallback:
         assert len(results) == 1
 
     def test_cjk_like_escapes_wildcards(self, db):
-        """LIKE wildcards (%, _) in CJK queries are treated as literals."""
+        """Special characters (%, _) in CJK queries are treated as literals."""
         db.create_session(session_id="s1", source="cli")
         db.create_session(session_id="s2", source="cli")
         db.append_message("s1", role="user", content="达成100%完成率")
@@ -776,6 +776,38 @@ class TestCJKSearchFallback:
         results = db.search_messages("100%完成")
         assert len(results) == 1
         assert results[0]["session_id"] == "s1"
+
+    def test_cjk_trigram_fts5_used_for_long_queries(self, db):
+        """Queries with 3+ CJK characters use the trigram FTS5 index
+        (not LIKE), which provides ranked results and proper snippets."""
+        db.create_session(session_id="s1", source="cli")
+        db.create_session(session_id="s2", source="cli")
+        db.append_message("s1", role="user", content="自然语言处理是人工智能的核心领域")
+        db.append_message("s2", role="user", content="人工智能涵盖很多方向")
+        results = db.search_messages("人工智能")
+        assert len(results) == 2
+        # Trigram path returns FTS5 snippets with >>> <<< markers
+        assert any(">>>" in r["snippet"] for r in results)
+
+    def test_cjk_trigram_preserves_boolean_operators(self, db):
+        """Boolean operators (OR, AND, NOT) work in CJK trigram queries."""
+        db.create_session(session_id="s1", source="cli")
+        db.create_session(session_id="s2", source="cli")
+        db.append_message("s1", role="user", content="记忆系统很好用")
+        db.append_message("s2", role="user", content="断裂连接需要修复")
+        results = db.search_messages("记忆系统 OR 断裂连接")
+        assert len(results) == 2
+        session_ids = {r["session_id"] for r in results}
+        assert session_ids == {"s1", "s2"}
+
+    def test_cjk_short_query_uses_like_fallback(self, db):
+        """Queries with <3 CJK characters fall back to LIKE (trigram
+        needs ≥9 UTF-8 bytes = 3 CJK chars)."""
+        db.create_session(session_id="s1", source="cli")
+        db.append_message("s1", role="user", content="测试功能正常")
+        # "测试" is 2 CJK chars — must still find results via LIKE
+        results = db.search_messages("测试")
+        assert len(results) == 1
 
 
 # =========================================================================
@@ -1234,7 +1266,7 @@ class TestSchemaInit:
     def test_schema_version(self, db):
         cursor = db._conn.execute("SELECT version FROM schema_version")
         version = cursor.fetchone()[0]
-        assert version == 9
+        assert version == 10
 
     def test_title_column_exists(self, db):
         """Verify the title column was created in the sessions table."""
@@ -1295,7 +1327,7 @@ class TestSchemaInit:
 
         # Verify migration
         cursor = migrated_db._conn.execute("SELECT version FROM schema_version")
-        assert cursor.fetchone()[0] == 9
+        assert cursor.fetchone()[0] == 10
 
         # Verify title column exists and is NULL for existing sessions
         session = migrated_db.get_session("existing")
