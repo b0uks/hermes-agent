@@ -86,6 +86,7 @@ COPY package.json package-lock.json ./
 COPY web/package.json web/package-lock.json web/
 COPY ui-tui/package.json ui-tui/package-lock.json ui-tui/
 COPY ui-tui/packages/hermes-ink/ ui-tui/packages/hermes-ink/
+COPY scripts/whatsapp-bridge/package.json scripts/whatsapp-bridge/package-lock.json scripts/whatsapp-bridge/
 
 # `npm_config_install_links=false` forces npm to install `file:` deps as
 # symlinks (the npm 10+ default) even on Debian's older bundled npm 9.x,
@@ -102,6 +103,7 @@ RUN npm install --prefer-offline --no-audit && \
     npx playwright install --with-deps chromium --only-shell && \
     (cd web && npm install --prefer-offline --no-audit) && \
     (cd ui-tui && npm install --prefer-offline --no-audit) && \
+    (cd scripts/whatsapp-bridge && npm install --prefer-offline --no-audit) && \
     npm cache clean --force
 
 # ---------- Layer-cached Python dependency install ----------
