@@ -19,11 +19,48 @@ set -eu
 
 HERMES_HOME="${HERMES_HOME:-/opt/data}"
 INSTALL_DIR="/opt/hermes"
+HERMES_RUNTIME_HOME="$HERMES_HOME/home"
+XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HERMES_RUNTIME_HOME/.config}"
+XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HERMES_RUNTIME_HOME/.cache}"
+XDG_DATA_HOME="${XDG_DATA_HOME:-$HERMES_RUNTIME_HOME/.local/share}"
+AWS_CONFIG_FILE="${AWS_CONFIG_FILE:-$XDG_CONFIG_HOME/aws/config}"
+AWS_SHARED_CREDENTIALS_FILE="${AWS_SHARED_CREDENTIALS_FILE:-$XDG_CONFIG_HOME/aws/credentials}"
+CLOUDSDK_CONFIG="${CLOUDSDK_CONFIG:-$XDG_CONFIG_HOME/gcloud}"
+JIRA_CONFIG_FILE="${JIRA_CONFIG_FILE:-$XDG_CONFIG_HOME/.jira/.config.yml}"
+
+chown_hermes_home() {
+    # Avoid recursively chowning the entire volume: users often bind-mount
+    # source trees under workspace/, and walking those trees can make startup
+    # appear hung. Only Hermes-managed paths are fixed here.
+    chown hermes:hermes "$HERMES_HOME" 2>/dev/null || return 1
+
+    for target in cron sessions logs hooks memories skills skins plans home .local; do
+        if [ -e "$HERMES_HOME/$target" ]; then
+            chown -R hermes:hermes "$HERMES_HOME/$target" 2>/dev/null || return 1
+        fi
+    done
+
+    for target in .env config.yaml SOUL.md auth.json .install_method; do
+        if [ -e "$HERMES_HOME/$target" ]; then
+            chown hermes:hermes "$HERMES_HOME/$target" 2>/dev/null || return 1
+        fi
+    done
+
+    if [ -d "$HERMES_HOME/workspace" ]; then
+        chown hermes:hermes "$HERMES_HOME/workspace" 2>/dev/null || return 1
+    fi
+}
 
 # --- UID/GID remap ---
 if [ -n "${HERMES_UID:-}" ] && [ "$HERMES_UID" != "$(id -u hermes)" ]; then
     echo "[stage2] Changing hermes UID to $HERMES_UID"
+    # usermod rewrites ownership under the user's home. When /opt/data is a
+    # bind-mounted HERMES_HOME with nested host mounts, that can traverse a
+    # huge tree or hang. Temporarily move HOME away; explicit chown below
+    # handles only the paths we actually need.
+    usermod -d /tmp hermes
     usermod -u "$HERMES_UID" hermes
+    usermod -d "$HERMES_HOME" hermes
 fi
 if [ -n "${HERMES_GID:-}" ] && [ "$HERMES_GID" != "$(id -g hermes)" ]; then
     echo "[stage2] Changing hermes GID to $HERMES_GID"
@@ -45,7 +82,7 @@ if [ "$needs_chown" = true ]; then
     # In rootless Podman the container's "root" is mapped to an
     # unprivileged host UID — chown will fail. That's fine: the volume
     # is already owned by the mapped user on the host side.
-    chown -R hermes:hermes "$HERMES_HOME" 2>/dev/null || \
+    chown_hermes_home || \
         echo "[stage2] Warning: chown failed (rootless container?) — continuing"
     # The .venv must also be re-chowned when UID is remapped, otherwise
     # lazy_deps.py cannot install platform packages (discord.py, etc.).
@@ -89,7 +126,13 @@ s6-setuidgid hermes mkdir -p \
     "$HERMES_HOME/skins" \
     "$HERMES_HOME/plans" \
     "$HERMES_HOME/workspace" \
-    "$HERMES_HOME/home"
+    "$HERMES_HOME/home" \
+    "$XDG_CONFIG_HOME" \
+    "$XDG_CACHE_HOME" \
+    "$XDG_DATA_HOME" \
+    "$(dirname "$AWS_CONFIG_FILE")" \
+    "$(dirname "$JIRA_CONFIG_FILE")" \
+    "$CLOUDSDK_CONFIG"
 
 # --- Install-method stamp (read by detect_install_method() in hermes status) ---
 # Preserved from the tini-era entrypoint (PR #27843). Must be written as

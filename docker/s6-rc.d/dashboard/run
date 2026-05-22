@@ -23,6 +23,15 @@ cd /opt/data
 # shellcheck disable=SC1091
 . /opt/hermes/.venv/bin/activate
 
+export HOME="${HERMES_HOME:-/opt/data}/home"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+export AWS_CONFIG_FILE="${AWS_CONFIG_FILE:-$XDG_CONFIG_HOME/aws/config}"
+export AWS_SHARED_CREDENTIALS_FILE="${AWS_SHARED_CREDENTIALS_FILE:-$XDG_CONFIG_HOME/aws/credentials}"
+export CLOUDSDK_CONFIG="${CLOUDSDK_CONFIG:-$XDG_CONFIG_HOME/gcloud}"
+export JIRA_CONFIG_FILE="${JIRA_CONFIG_FILE:-$XDG_CONFIG_HOME/.jira/.config.yml}"
+
 dash_host="${HERMES_DASHBOARD_HOST:-0.0.0.0}"
 dash_port="${HERMES_DASHBOARD_PORT:-9119}"
 

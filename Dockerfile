@@ -8,7 +8,9 @@ ENV PYTHONUNBUFFERED=1
 # install survives the /opt/data volume overlay at runtime.
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright
 
-# Install system dependencies in one layer, clear APT cache.
+# Install system dependencies and lightweight operator CLIs in one layer, then
+# clear APT/cache artifacts. gh + jira are intentionally included so agents
+# can use compact CLI workflows instead of heavier MCP servers for GitHub/Jira.
 # tini was previously PID 1 to reap orphaned zombie processes (MCP stdio
 # subprocesses, git, bun, etc.) that would otherwise accumulate when hermes
 # ran as PID 1. See #15012. Phase 2 of the s6-overlay supervision plan
@@ -17,8 +19,35 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright
 # hermes process, the dashboard, and per-profile gateways.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    build-essential curl nodejs npm python3 ripgrep ffmpeg gcc python3-dev libffi-dev procps git openssh-client docker-cli xz-utils && \
-    rm -rf /var/lib/apt/lists/*
+    build-essential ca-certificates curl gnupg jq nodejs npm python3 ripgrep ffmpeg gcc python3-dev libffi-dev procps git openssh-client docker-cli unzip xz-utils && \
+    mkdir -p -m 755 /etc/apt/keyrings /etc/apt/sources.list.d && \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list && \
+    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+        | gpg --dearmor -o /etc/apt/keyrings/cloud.google.gpg && \
+    chmod go+r /etc/apt/keyrings/cloud.google.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
+        > /etc/apt/sources.list.d/google-cloud-sdk.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends gh google-cloud-cli && \
+    case "$(dpkg --print-architecture)" in \
+        amd64) aws_arch="x86_64"; jira_arch="x86_64" ;; \
+        arm64) aws_arch="aarch64"; jira_arch="arm64" ;; \
+        *) echo "Unsupported architecture for bundled CLIs: $(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac && \
+    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}.zip" -o /tmp/awscliv2.zip && \
+    unzip -q /tmp/awscliv2.zip -d /tmp && \
+    /tmp/aws/install && \
+    jira_version="1.7.0" && \
+    curl -fsSL "https://github.com/ankitpokhrel/jira-cli/releases/download/v${jira_version}/jira_${jira_version}_linux_${jira_arch}.tar.gz" \
+        -o /tmp/jira.tar.gz && \
+    mkdir -p /tmp/jira && \
+    tar -xzf /tmp/jira.tar.gz -C /tmp/jira && \
+    install -m 0755 "$(find /tmp/jira -type f -name jira | head -n 1)" /usr/local/bin/jira && \
+    rm -rf /var/lib/apt/lists/* /tmp/aws /tmp/awscliv2.zip /tmp/jira /tmp/jira.tar.gz
 
 # ---------- s6-overlay install ----------
 # s6-overlay provides supervision for the main hermes process, the dashboard,
@@ -190,6 +219,14 @@ COPY --chmod=0755 docker/cont-init.d/02-reconcile-profiles /etc/cont-init.d/02-r
 # ---------- Runtime ----------
 ENV HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist
 ENV HERMES_HOME=/opt/data
+ENV HOME=/opt/data/home
+ENV XDG_CONFIG_HOME=/opt/data/home/.config
+ENV XDG_CACHE_HOME=/opt/data/home/.cache
+ENV XDG_DATA_HOME=/opt/data/home/.local/share
+ENV AWS_CONFIG_FILE=/opt/data/home/.config/aws/config
+ENV AWS_SHARED_CREDENTIALS_FILE=/opt/data/home/.config/aws/credentials
+ENV CLOUDSDK_CONFIG=/opt/data/home/.config/gcloud
+ENV JIRA_CONFIG_FILE=/opt/data/home/.config/.jira/.config.yml
 # Pre-s6 entrypoint.sh did `source .venv/bin/activate` which exported
 # the venv bin onto PATH; Architecture B's main-wrapper.sh does the
 # same for the container's main process, but `docker exec` and our

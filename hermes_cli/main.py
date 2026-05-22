@@ -1831,6 +1831,15 @@ def cmd_proxy(args):
         raise SystemExit(rc)
 
 
+def cmd_docker(args):
+    """Host-side Docker launcher and lifecycle helpers."""
+    from hermes_cli.docker_launcher import command_main
+
+    code = command_main(args)
+    if code:
+        sys.exit(code)
+
+
 def cmd_whatsapp(args):
     """Set up WhatsApp: choose mode, configure, install bridge, pair via QR."""
     _require_tty("whatsapp")
@@ -9907,6 +9916,7 @@ def _coalesce_session_name_args(argv: list) -> list:
         "auth",
         "status",
         "cron",
+        "docker",
         "doctor",
         "config",
         "pairing",
@@ -10758,7 +10768,7 @@ _BUILTIN_SUBCOMMANDS = frozenset(
     {
         "acp", "auth", "backup", "bundles", "checkpoints", "claw", "completion",
         "computer-use",
-        "config", "cron", "curator", "dashboard", "debug", "doctor",
+        "config", "cron", "curator", "dashboard", "debug", "docker", "doctor",
         "dump", "fallback", "gateway", "hooks", "import", "insights",
         "kanban", "login", "logout", "logs", "lsp", "mcp", "memory", "migrate",
         "model", "pairing", "plugins", "portal", "postinstall", "profile", "proxy",
@@ -11449,6 +11459,35 @@ def main():
     )
     proxy_parser.set_defaults(func=cmd_proxy)
     gateway_parser.set_defaults(func=cmd_gateway)
+
+    # =========================================================================
+    # docker command
+    # =========================================================================
+    docker_parser = subparsers.add_parser(
+        "docker",
+        help="Launch and manage Hermes Docker containers",
+        description=(
+            "Friendly wrapper around the official Docker image. "
+            "Use `hermes docker <subcommand> --help` for setup, gateway, "
+            "chat, continue, resume, logs, and lifecycle helpers."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+Examples:
+    hermes docker setup
+    hermes docker gateway --dashboard --dashboard-tui
+    hermes docker continue
+    hermes docker resume "Project session"
+    hermes docker logs -f
+    hermes docker stop
+""",
+    )
+    docker_parser.add_argument(
+        "docker_args",
+        nargs=argparse.REMAINDER,
+        help="Arguments for the Docker launcher",
+    )
+    docker_parser.set_defaults(func=cmd_docker)
 
     # =========================================================================
     # lsp command

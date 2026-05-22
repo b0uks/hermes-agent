@@ -15,6 +15,36 @@ This page covers option 1. The container stores all user data (config, API keys,
 
 ## Quick start
 
+If you have the Hermes CLI installed on the host, the easiest path is the
+Docker launcher:
+
+```sh
+hermes docker setup
+hermes docker gateway
+```
+
+The launcher mounts `~/.hermes` as `/opt/data`, generates a stable container
+name from that data directory, and keeps host-side file ownership aligned by
+passing your UID/GID into the container. You can use `hermes-docker` as the
+same command, or add a short shell alias:
+
+```sh
+alias hd='hermes docker'
+```
+
+Common follow-up commands:
+
+```sh
+hermes docker logs -f              # follow gateway logs
+hermes docker continue             # resume the most recent TUI session
+hermes docker resume "Project X"   # resume by session title or ID
+hermes docker shell                # open a shell in the gateway container
+hermes docker stop                 # stop the gateway container
+```
+
+Use `--data-dir <path>` for a separate profile/container and `--name <name>`
+if you want to override the generated container name.
+
 If this is your first time running Hermes Agent, create a data directory on the host and start the container interactively to run the setup wizard:
 
 ```sh
@@ -27,6 +57,12 @@ docker run -it --rm \
 This drops you into the setup wizard, which will prompt you for your API keys and write them to `~/.hermes/.env`. You only need to do this once. It is highly recommended to set up a chat system for the gateway to work with at this point.
 
 ## Running in gateway mode
+
+With the launcher:
+
+```sh
+hermes docker gateway
+```
 
 Once configured, run the container in the background as a persistent gateway (Telegram, Discord, Slack, WhatsApp, etc.):
 
@@ -60,7 +96,13 @@ Opening any port on an internet facing machine is a security risk. You should no
 
 ## Running the dashboard
 
-The built-in web dashboard runs as an optional side-process inside the same container as the gateway. Set `HERMES_DASHBOARD=1` to run the dashboard on container loopback (`127.0.0.1`) by default:
+With the launcher:
+
+```sh
+hermes docker gateway --dashboard --dashboard-tui
+```
+
+The built-in web dashboard runs as an optional supervised service inside the same container as the gateway. For manual `docker run` usage, set `HERMES_DASHBOARD=1` and expose port `9119` alongside the gateway's `8642`:
 
 ```sh
 docker run -d \
@@ -68,20 +110,21 @@ docker run -d \
   --restart unless-stopped \
   -v ~/.hermes:/opt/data \
   -p 8642:8642 \
+  -p 9119:9119 \
   -e HERMES_DASHBOARD=1 \
   nousresearch/hermes-agent gateway run
 ```
 
-The entrypoint starts `hermes dashboard` in the background (running as the non-root `hermes` user) before `exec`-ing the main command. Dashboard output is prefixed with `[dashboard]` in `docker logs` so it's easy to separate from gateway logs.
+The s6 supervisor starts `hermes dashboard` as the non-root `hermes` user and forwards service output into `docker logs`.
 
 | Environment variable | Description | Default |
 |---------------------|-------------|---------|
 | `HERMES_DASHBOARD` | Set to `1` (or `true` / `yes`) to launch the dashboard alongside the main command | *(unset — dashboard not started)* |
-| `HERMES_DASHBOARD_HOST` | Bind address for the dashboard HTTP server | `127.0.0.1` |
+| `HERMES_DASHBOARD_HOST` | Bind address for the dashboard HTTP server | `0.0.0.0` |
 | `HERMES_DASHBOARD_PORT` | Port for the dashboard HTTP server | `9119` |
 | `HERMES_DASHBOARD_TUI` | Set to `1` to expose the in-browser Chat tab (embedded `hermes --tui` via PTY/WebSocket) | *(unset)* |
 
-By default, the dashboard stays on loopback to avoid exposing the unauthenticated web surface over the network. To publish it intentionally, set `HERMES_DASHBOARD_HOST=0.0.0.0` and configure your own trusted network boundary/reverse proxy. In that case you must explicitly add `--insecure` behavior by passing host/flags in your command path (the entrypoint no longer auto-enables insecure mode).
+Publishing dashboard port `9119` exposes the dashboard outside the container. Only publish it behind your own trusted network boundary or reverse proxy.
 
 :::note
 The dashboard runs as a supervised s6 service inside the container. If
@@ -96,6 +139,14 @@ gateway process.
 :::
 
 ## Running interactively (CLI chat)
+
+With the launcher:
+
+```sh
+hermes docker chat
+hermes docker continue
+hermes docker resume <session-id-or-title>
+```
 
 To open an interactive chat session against a running data directory:
 
