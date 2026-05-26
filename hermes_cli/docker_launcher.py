@@ -23,6 +23,7 @@ from typing import Sequence
 DEFAULT_IMAGE = "nousresearch/hermes-agent:latest"
 DEFAULT_GATEWAY_PORT = 8642
 DEFAULT_DASHBOARD_PORT = 9119
+DEFAULT_TUI_DIR = "/opt/hermes/ui-tui"
 
 
 def _default_data_dir() -> Path:
@@ -104,6 +105,7 @@ def _name(args: argparse.Namespace, *, role: str = "gateway") -> str:
 def _base_run_args(args: argparse.Namespace, *, interactive: bool, name: str) -> list[str]:
     data_dir = _ensure_data_dir(Path(args.data_dir))
     flags = ["-it", "--rm"] if interactive else ["-d"]
+    user_env = list(args.env or [])
     cmd = [
         _docker(dry_run=args.dry_run),
         "run",
@@ -114,7 +116,9 @@ def _base_run_args(args: argparse.Namespace, *, interactive: bool, name: str) ->
         f"{data_dir}:/opt/data",
         *_uid_gid_env(),
     ]
-    for item in args.env or []:
+    if not any(item.split("=", 1)[0] == "HERMES_TUI_DIR" for item in user_env):
+        cmd.extend(["-e", f"HERMES_TUI_DIR={DEFAULT_TUI_DIR}"])
+    for item in user_env:
         cmd.extend(["-e", item])
     return cmd
 

@@ -37,6 +37,7 @@ def test_gateway_dry_run_generates_name_and_dashboard_flags(tmp_path, monkeypatc
     assert "-p 9119:9119" in out
     assert "-e HERMES_DASHBOARD=1" in out
     assert "-e HERMES_DASHBOARD_TUI=1" in out
+    assert "-e HERMES_TUI_DIR=/opt/hermes/ui-tui" in out
     assert "nousresearch/hermes-agent:latest gateway run" in out
 
 
@@ -90,4 +91,25 @@ def test_command_main_supports_hermes_docker_subcommand(tmp_path, monkeypatch, c
     out = capsys.readouterr().out
     assert code == 0
     assert " -- --model" not in out
+    assert "-e HERMES_TUI_DIR=/opt/hermes/ui-tui" in out
     assert "--tui --model gpt-test" in out
+
+
+def test_user_env_can_override_tui_dir(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(docker_launcher.shutil, "which", lambda name: "docker")
+
+    code = docker_launcher.main(
+        [
+            "chat",
+            "--data-dir",
+            str(tmp_path / ".hermes"),
+            "--dry-run",
+            "-e",
+            "HERMES_TUI_DIR=/custom/tui",
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "-e HERMES_TUI_DIR=/custom/tui" in out
+    assert "-e HERMES_TUI_DIR=/opt/hermes/ui-tui" not in out
