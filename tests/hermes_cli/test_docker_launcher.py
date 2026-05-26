@@ -94,7 +94,20 @@ def test_command_main_supports_hermes_docker_subcommand(tmp_path, monkeypatch, c
     assert " -- --model" not in out
     assert "-e HERMES_INSTALL_METHOD=docker" in out
     assert "-e HERMES_TUI_DIR=/opt/hermes/ui-tui" in out
+    assert "-e HERMES_SKIP_PROFILE_GATEWAY_RECONCILE=1" in out
     assert "--tui --model gpt-test" in out
+
+
+def test_gateway_does_not_skip_profile_gateway_reconcile(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(docker_launcher.shutil, "which", lambda name: "docker")
+
+    code = docker_launcher.main(
+        ["gateway", "--data-dir", str(tmp_path / ".hermes"), "--dry-run"]
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "HERMES_SKIP_PROFILE_GATEWAY_RECONCILE" not in out
 
 
 def test_user_env_can_override_tui_dir(tmp_path, monkeypatch, capsys):

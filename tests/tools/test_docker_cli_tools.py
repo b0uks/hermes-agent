@@ -38,3 +38,10 @@ def test_runtime_persists_cli_config_in_hermes_home() -> None:
     ):
         assert expected in main_wrapper
         assert expected in dashboard_run
+
+
+def test_profile_gateway_reconcile_can_be_skipped_for_ephemeral_containers() -> None:
+    reconcile = Path("docker/cont-init.d/02-reconcile-profiles").read_text()
+
+    assert "HERMES_SKIP_PROFILE_GATEWAY_RECONCILE" in reconcile
+    assert "reconcile: skipped" in reconcile

@@ -24,6 +24,13 @@
 # and swallows the failure).
 set -e
 
+case "${HERMES_SKIP_PROFILE_GATEWAY_RECONCILE:-}" in
+    1|true|TRUE|True|yes|YES|Yes)
+        echo "reconcile: skipped because HERMES_SKIP_PROFILE_GATEWAY_RECONCILE is set"
+        exit 0
+        ;;
+esac
+
 # Make the dynamic scandir hermes-writable. The directory itself
 # starts root-owned by s6-overlay.
 chown hermes:hermes /run/service 2>/dev/null || true
@@ -43,4 +50,3 @@ if [ -d /run/service/.s6-svscan ]; then
 fi
 
 exec s6-setuidgid hermes /opt/hermes/.venv/bin/python -m hermes_cli.container_boot
-

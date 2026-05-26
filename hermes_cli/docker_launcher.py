@@ -25,6 +25,7 @@ DEFAULT_GATEWAY_PORT = 8642
 DEFAULT_DASHBOARD_PORT = 9119
 DEFAULT_TUI_DIR = "/opt/hermes/ui-tui"
 DEFAULT_INSTALL_METHOD = "docker"
+SKIP_PROFILE_GATEWAY_RECONCILE = "HERMES_SKIP_PROFILE_GATEWAY_RECONCILE=1"
 
 
 def _default_data_dir() -> Path:
@@ -126,6 +127,12 @@ def _base_run_args(args: argparse.Namespace, *, interactive: bool, name: str) ->
     return cmd
 
 
+def _add_skip_profile_gateway_reconcile(cmd: list[str], args: argparse.Namespace) -> None:
+    user_env = list(args.env or [])
+    if not any(item.split("=", 1)[0] == "HERMES_SKIP_PROFILE_GATEWAY_RECONCILE" for item in user_env):
+        cmd.extend(["-e", SKIP_PROFILE_GATEWAY_RECONCILE])
+
+
 def _container_exists(name: str) -> bool:
     result = _capture([_docker(), "inspect", "--format", "{{.Id}}", name])
     return result.returncode == 0
@@ -139,6 +146,7 @@ def _container_running(name: str) -> bool:
 def cmd_setup(args: argparse.Namespace) -> int:
     name = _name(args, role=f"setup-{os.getpid()}")
     cmd = _base_run_args(args, interactive=True, name=name)
+    _add_skip_profile_gateway_reconcile(cmd, args)
     cmd.extend([_image(args), "setup"])
     return _run(cmd, dry_run=args.dry_run)
 
@@ -181,6 +189,7 @@ def _chat_container_name(args: argparse.Namespace, role: str = "chat") -> str:
 def cmd_chat(args: argparse.Namespace) -> int:
     name = _chat_container_name(args)
     cmd = _base_run_args(args, interactive=True, name=name)
+    _add_skip_profile_gateway_reconcile(cmd, args)
     hermes_args = _remainder(args)
     if args.tui and "--tui" not in hermes_args:
         hermes_args.insert(0, "--tui")
@@ -191,6 +200,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
 def cmd_continue(args: argparse.Namespace) -> int:
     name = _chat_container_name(args, "continue")
     cmd = _base_run_args(args, interactive=True, name=name)
+    _add_skip_profile_gateway_reconcile(cmd, args)
     hermes_args = ["--tui", "--continue"]
     if args.session:
         hermes_args.append(args.session)
@@ -202,6 +212,7 @@ def cmd_continue(args: argparse.Namespace) -> int:
 def cmd_resume(args: argparse.Namespace) -> int:
     name = _chat_container_name(args, "resume")
     cmd = _base_run_args(args, interactive=True, name=name)
+    _add_skip_profile_gateway_reconcile(cmd, args)
     hermes_args = ["--tui", "--resume", args.session]
     hermes_args.extend(_remainder(args))
     cmd.extend([_image(args), *hermes_args])
