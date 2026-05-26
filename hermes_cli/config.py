@@ -283,12 +283,16 @@ def detect_install_method(project_root: Optional[Path] = None) -> str:
     """Detect how Hermes was installed: 'docker', 'nixos', 'homebrew', 'git', or 'pip'.
 
     Resolution order:
-    1. Stamped ``~/.hermes/.install_method`` file (written by installers)
-    2. HERMES_MANAGED env / .managed marker (NixOS, Homebrew)
-    3. Container detection (/.dockerenv, /run/.containerenv, cgroup)
-    4. .git directory presence -> 'git'
-    5. Fallback -> 'pip'
+    1. HERMES_INSTALL_METHOD env override
+    2. Stamped ``~/.hermes/.install_method`` file (written by installers)
+    3. HERMES_MANAGED env / .managed marker (NixOS, Homebrew)
+    4. Container detection (/.dockerenv, /run/.containerenv, cgroup)
+    5. .git directory presence -> 'git'
+    6. Fallback -> 'pip'
     """
+    env_method = os.getenv("HERMES_INSTALL_METHOD", "").strip().lower()
+    if env_method:
+        return env_method
     stamp = get_hermes_home() / ".install_method"
     try:
         method = stamp.read_text(encoding="utf-8").strip().lower()

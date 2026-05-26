@@ -31,6 +31,16 @@ def test_managed_install_takes_precedence(tmp_path):
         assert method == "nixos"
 
 
+def test_install_method_env_takes_precedence(tmp_path, monkeypatch):
+    """Docker launcher can override host-mounted install metadata."""
+    (tmp_path / ".install_method").write_text("pip\n")
+    monkeypatch.setenv("HERMES_INSTALL_METHOD", "docker")
+    with patch("hermes_cli.config.get_managed_system", return_value=None), \
+         patch("hermes_cli.config.get_hermes_home", return_value=tmp_path):
+        from hermes_cli.config import detect_install_method
+        assert detect_install_method(project_root=tmp_path) == "docker"
+
+
 def test_recommended_update_command_pip():
     """Pip installs recommend pip install --upgrade."""
     from hermes_cli.config import recommended_update_command_for_method

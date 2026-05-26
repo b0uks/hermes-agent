@@ -19,6 +19,12 @@ def test_dockerfile_uses_prebuilt_tui_bundle_at_runtime() -> None:
     assert "ENV HERMES_TUI_DIR=/opt/hermes/ui-tui" in dockerfile
 
 
+def test_dockerfile_marks_install_method() -> None:
+    dockerfile = Path("Dockerfile").read_text()
+
+    assert "ENV HERMES_INSTALL_METHOD=docker" in dockerfile
+
+
 def test_runtime_persists_cli_config_in_hermes_home() -> None:
     main_wrapper = Path("docker/main-wrapper.sh").read_text()
     dashboard_run = Path("docker/s6-rc.d/dashboard/run").read_text()
