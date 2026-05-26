@@ -128,6 +128,10 @@ COPY scripts/whatsapp-bridge/package.json scripts/whatsapp-bridge/package-lock.j
 # check on every startup and triggers a runtime `npm install` that then
 # fails with EACCES (node_modules/ is root-owned from build time).
 ENV npm_config_install_links=false
+ENV UV_NATIVE_TLS=true
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 
 # Optional corporate/root CA support for TLS-inspecting networks. Pass a PEM
 # bundle at build time with:
