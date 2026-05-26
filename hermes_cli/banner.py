@@ -231,8 +231,16 @@ def check_for_updates() -> Optional[int]:
     hermes_home = get_hermes_home()
     cache_file = hermes_home / ".update_check"
     embedded_rev = os.environ.get("HERMES_REVISION") or None
+    try:
+        from hermes_cli.config import detect_install_method
+        install_method = detect_install_method(Path(__file__).parent.parent.resolve())
+    except Exception:
+        install_method = None
 
     # Read cache — invalidate if the embedded rev has changed since last check
+    # or if the install method has changed. Docker containers commonly mount
+    # the same HERMES_HOME used by a host pip/git install, so trusting a
+    # host-computed cache inside the container can produce nonsense advice.
     now = time.time()
     try:
         if cache_file.exists():
@@ -240,6 +248,7 @@ def check_for_updates() -> Optional[int]:
             if (
                 now - cached.get("ts", 0) < _UPDATE_CHECK_CACHE_SECONDS
                 and cached.get("rev") == embedded_rev
+                and cached.get("install_method") == install_method
             ):
                 return cached.get("behind")
     except Exception:
@@ -260,7 +269,12 @@ def check_for_updates() -> Optional[int]:
             behind = _check_via_local_git(repo_dir)
 
     try:
-        cache_file.write_text(json.dumps({"ts": now, "behind": behind, "rev": embedded_rev}))
+        cache_file.write_text(json.dumps({
+            "ts": now,
+            "behind": behind,
+            "rev": embedded_rev,
+            "install_method": install_method,
+        }))
     except Exception:
         pass
 
