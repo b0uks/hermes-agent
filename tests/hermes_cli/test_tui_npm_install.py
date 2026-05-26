@@ -193,3 +193,23 @@ def test_make_tui_argv_keeps_desktop_always_build_behaviour(
 
     assert calls
     assert calls[0][0][0] == ["/bin/npm", "run", "build"]
+
+
+def test_tui_dir_prebuilt_bundle_skips_runtime_build(
+    tmp_path: Path, main_mod, monkeypatch
+) -> None:
+    """Docker sets HERMES_TUI_DIR so remapped users don't rebuild /opt/hermes."""
+    _touch_tui_entry(tmp_path)
+    monkeypatch.setenv("HERMES_TUI_DIR", str(tmp_path))
+    monkeypatch.setattr(main_mod, "_ensure_tui_node", lambda: None)
+    monkeypatch.setattr(main_mod.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def fail_if_run(*args, **kwargs):
+        raise AssertionError("prebuilt TUI launch must not run npm")
+
+    monkeypatch.setattr(main_mod.subprocess, "run", fail_if_run)
+
+    argv, cwd = main_mod._make_tui_argv(tmp_path / "source", tui_dev=False)
+
+    assert argv == ["/usr/bin/node", "--expose-gc", str(tmp_path / "dist" / "entry.js")]
+    assert cwd == tmp_path
