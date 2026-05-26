@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 FROM ghcr.io/astral-sh/uv:0.11.6-python3.13-trixie@sha256:b3c543b6c4f23a5f2df22866bd7857e5d304b67a564f4feab6ac22044dde719b AS uv_source
 FROM debian:13.4
 
@@ -127,6 +128,16 @@ COPY scripts/whatsapp-bridge/package.json scripts/whatsapp-bridge/package-lock.j
 # check on every startup and triggers a runtime `npm install` that then
 # fails with EACCES (node_modules/ is root-owned from build time).
 ENV npm_config_install_links=false
+
+# Optional corporate/root CA support for TLS-inspecting networks. Pass a PEM
+# bundle at build time with:
+#   docker build --secret id=hermes_ca,src=/path/to/ca.pem ...
+RUN --mount=type=secret,id=hermes_ca,target=/tmp/hermes-ca.pem,required=false \
+    if [ -s /tmp/hermes-ca.pem ]; then \
+        install -m 0644 /tmp/hermes-ca.pem /usr/local/share/ca-certificates/hermes-extra-ca.crt; \
+        update-ca-certificates; \
+        npm config set cafile /etc/ssl/certs/ca-certificates.crt; \
+    fi
 
 RUN npm install --prefer-offline --no-audit && \
     npx playwright install --with-deps chromium --only-shell && \
