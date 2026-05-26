@@ -118,6 +118,8 @@ def _base_run_args(args: argparse.Namespace, *, interactive: bool, name: str) ->
         f"{data_dir}:/opt/data",
         *_uid_gid_env(),
     ]
+    for item in args.volume or []:
+        cmd.extend(["-v", item])
     if not any(item.split("=", 1)[0] == "HERMES_INSTALL_METHOD" for item in user_env):
         cmd.extend(["-e", f"HERMES_INSTALL_METHOD={DEFAULT_INSTALL_METHOD}"])
     if not any(item.split("=", 1)[0] == "HERMES_TUI_DIR" for item in user_env):
@@ -296,6 +298,13 @@ def _add_common_flags(parser: argparse.ArgumentParser) -> None:
         action="append",
         metavar="KEY=VALUE",
         help="Additional environment variable for docker run (repeatable)",
+    )
+    parser.add_argument(
+        "-v",
+        "--volume",
+        action="append",
+        metavar="HOST:CONTAINER[:MODE]",
+        help="Additional Docker bind mount for docker run (repeatable)",
     )
     parser.add_argument(
         "--dry-run",

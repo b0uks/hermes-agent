@@ -42,6 +42,25 @@ def test_gateway_dry_run_generates_name_and_dashboard_flags(tmp_path, monkeypatc
     assert "nousresearch/hermes-agent:latest gateway run" in out
 
 
+def test_common_flags_add_extra_volumes(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(docker_launcher.shutil, "which", lambda name: "docker")
+
+    code = docker_launcher.main(
+        [
+            "chat",
+            "--data-dir",
+            str(tmp_path / ".hermes"),
+            "--dry-run",
+            "-v",
+            "/host/penny:/opt/penny",
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "-v /host/penny:/opt/penny" in out
+
+
 def test_continue_dry_run_wraps_latest_session_resume(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(docker_launcher.shutil, "which", lambda name: "docker")
 
