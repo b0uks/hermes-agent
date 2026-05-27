@@ -13,6 +13,30 @@
 # workload runs unprivileged (UID 10000 by default).
 set -e
 
+if [ -d /command ]; then
+    export PATH="/command:$PATH"
+fi
+
+# s6-overlay runs the Docker CMD as the "main program" through rc.init, which
+# does not reliably preserve Docker's container env for this wrapper. Rehydrate
+# it here so gateway/CLI processes see HERMES_HOME, mounted skills, and other
+# launcher-provided settings before we drop privileges.
+if [ -d /run/s6/container_environment ]; then
+    for env_file in /run/s6/container_environment/*; do
+        [ -f "$env_file" ] || continue
+        env_name="${env_file##*/}"
+        case "$env_name" in
+            ""|[0-9]*|*[!A-Za-z0-9_]*)
+                continue
+                ;;
+        esac
+        env_value="$(cat "$env_file")"
+        export "$env_name=$env_value"
+    done
+fi
+
+export HERMES_HOME="${HERMES_HOME:-/opt/data}"
+
 cd /opt/data
 # shellcheck disable=SC1091
 . /opt/hermes/.venv/bin/activate
