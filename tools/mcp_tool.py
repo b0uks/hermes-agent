@@ -2725,6 +2725,8 @@ def _normalize_mcp_input_schema(schema: dict | None) -> dict:
     * ``required`` arrays are pruned to only names that exist in
       ``properties``; otherwise Google AI Studio / Gemini 400s with
       ``property is not defined``.  See PR #4651.
+    * ``array`` nodes missing ``items`` get a permissive empty item schema;
+      Azure/OpenAI-compatible providers reject arrays without ``items``.
     * MCP/Pydantic optional fields commonly arrive as
       ``anyOf: [{...}, {"type": "null"}], default: null``.  Anthropic rejects
       nullable branches in tool input schemas, so nullable unions are collapsed
@@ -2799,6 +2801,9 @@ def _normalize_mcp_input_schema(schema: dict | None) -> dict:
                         repaired["required"] = valid
                     else:
                         repaired.pop("required", None)
+
+        if repaired.get("type") == "array" and "items" not in repaired:
+            repaired["items"] = {}
 
         return repaired
 

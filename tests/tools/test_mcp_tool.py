@@ -266,6 +266,22 @@ class TestSchemaConversion:
 
         assert schema["properties"]["items"]["items"]["properties"] == {}
 
+    def test_array_missing_items_gets_permissive_items_schema(self):
+        """Azure/OpenAI-compatible providers reject arrays without items."""
+        from tools.mcp_tool import _normalize_mcp_input_schema
+
+        schema = _normalize_mcp_input_schema({
+            "type": "object",
+            "properties": {
+                "job_ids": {"type": "array"},
+            },
+        })
+
+        assert schema["properties"]["job_ids"] == {
+            "type": "array",
+            "items": {},
+        }
+
     def test_optional_nullable_field_is_collapsed_to_non_null_schema(self):
         """Anthropic rejects MCP/Pydantic anyOf-null optional parameter schemas."""
         from tools.mcp_tool import _normalize_mcp_input_schema
