@@ -129,6 +129,84 @@ Or target the generated/explicit container name directly:
 hermes docker exec --name hermes-hermes-data-b306ecbb
 ```
 
+### Gateway command crib sheet
+
+This example starts a long-running gateway from a local development image,
+mounts a separate host data directory, exposes the dashboard/TUI, loads an
+external skills directory, and mounts local repos that MCP servers may need:
+
+```sh
+hermes docker gateway \
+  --data-dir ~/hermes-data \
+  --image hermes-agent:docker-fork \
+  --skills-dir ~/.claude/skills \
+  -v ~/repos/penny:/opt/data/workspace/repos/penny \
+  -v ~/repos/penny-otto:/opt/data/workspace/repos/penny-otto \
+  --dashboard --dashboard-tui
+```
+
+Attach a TUI to that same gateway container:
+
+```sh
+hermes docker exec --data-dir ~/hermes-data
+```
+
+Attach with approval prompts bypassed for this TUI session:
+
+```sh
+hermes docker exec \
+  --data-dir ~/hermes-data \
+  -- --yolo --tui
+```
+
+The `--` matters: arguments after it are passed to `hermes` inside the
+container instead of being parsed by the Docker launcher.
+
+Start the gateway with approval prompts bypassed for gateway-created sessions:
+
+```sh
+hermes docker gateway \
+  --data-dir ~/hermes-data \
+  --image hermes-agent:docker-fork \
+  --skills-dir ~/.claude/skills \
+  -e HERMES_YOLO_MODE=1 \
+  -v ~/repos/penny:/opt/data/workspace/repos/penny \
+  -v ~/repos/penny-otto:/opt/data/workspace/repos/penny-otto \
+  --dashboard --dashboard-tui
+```
+
+Make approval bypass persistent for the mounted data directory:
+
+```sh
+hermes docker exec \
+  --data-dir ~/hermes-data \
+  -- config set approvals.mode off
+```
+
+If your provider rejects requests because the `tools` array is too large, limit
+MCP servers per platform by naming only the servers that platform should expose.
+For example, this keeps CLI/TUI and WhatsApp on Penny MCP only while leaving
+other MCP servers configured globally:
+
+```yaml
+platform_toolsets:
+  cli:
+    - hermes-cli
+    - penny
+  whatsapp:
+    - hermes-whatsapp
+    - penny
+```
+
+Useful lifecycle commands for that same data directory:
+
+```sh
+hermes docker status --data-dir ~/hermes-data
+hermes docker logs --data-dir ~/hermes-data -f
+hermes docker stop --data-dir ~/hermes-data
+hermes docker rm --data-dir ~/hermes-data
+```
+
 All platform configuration lives under the mounted data directory. If WhatsApp,
 Telegram, or another gateway platform disappears after switching commands,
 check that you are mounting the data directory that contains its `.env`,
