@@ -35,15 +35,52 @@ alias hd='hermes docker'
 Common follow-up commands:
 
 ```sh
+hermes docker status               # show gateway container status
 hermes docker logs -f              # follow gateway logs
-hermes docker continue             # resume the most recent TUI session
-hermes docker resume "Project X"   # resume by session title or ID
+hermes docker exec                 # attach a TUI to the gateway container
+hermes docker exec -- --continue   # attach and resume the latest session
 hermes docker shell                # open a shell in the gateway container
 hermes docker stop                 # stop the gateway container
+hermes docker rm                   # remove the stopped gateway container
 ```
 
 Use `--data-dir <path>` for a separate profile/container and `--name <name>`
-if you want to override the generated container name.
+if you want to override the generated container name. Use the same
+`--data-dir` or `--name` for follow-up commands (`exec`, `logs`, `shell`,
+`stop`, `rm`) so the launcher targets the same container.
+
+The most common mistake is starting with a custom data directory and then
+running a follow-up command without it:
+
+```sh
+hermes docker gateway --data-dir ~/hermes-data
+hermes docker exec                         # wrong: targets the default ~/.hermes container
+hermes docker exec --data-dir ~/hermes-data # correct
+```
+
+To load skills maintained outside the Hermes data directory, mount them with
+`--skills-dir`. The launcher mounts the directory read-only and exposes it to
+Hermes as an external skills directory:
+
+```sh
+hermes docker chat --skills-dir ~/.claude/skills
+hermes docker gateway --skills-dir ~/.claude/skills
+```
+
+Use `-v` / `--volume` for any extra host paths the gateway needs, such as
+local MCP server repositories or shared workspaces:
+
+```sh
+hermes docker gateway \
+  -v ~/repos/my-mcp:/opt/my-mcp \
+  -v ~/work/project:/workspace/project
+```
+
+For local images built from a branch, pass `--image <tag>`:
+
+```sh
+hermes docker gateway --image hermes-agent:docker-fork
+```
 
 If this is your first time running Hermes Agent, create a data directory on the host and start the container interactively to run the setup wizard:
 
@@ -63,6 +100,41 @@ With the launcher:
 ```sh
 hermes docker gateway
 ```
+
+For a gateway that uses a non-default data directory, a local image, external
+skills, and extra host mounts:
+
+```sh
+hermes docker gateway \
+  --data-dir /path/to/hermes-data \
+  --image hermes-agent:docker-fork \
+  --skills-dir ~/.claude/skills \
+  -v ~/repos/penny:/opt/data/workspace/repos/penny \
+  -v ~/repos/penny-otto:/opt/data/workspace/repos/penny-otto \
+  --dashboard --dashboard-tui
+```
+
+The launcher generates the container name from `--data-dir` unless you pass
+`--name`. To attach to this gateway later, repeat the same `--data-dir`:
+
+```sh
+hermes docker exec --data-dir /path/to/hermes-data
+hermes docker logs --data-dir /path/to/hermes-data -f
+hermes docker stop --data-dir /path/to/hermes-data
+```
+
+Or target the generated/explicit container name directly:
+
+```sh
+hermes docker exec --name hermes-hermes-data-b306ecbb
+```
+
+All platform configuration lives under the mounted data directory. If WhatsApp,
+Telegram, or another gateway platform disappears after switching commands,
+check that you are mounting the data directory that contains its `.env`,
+`config.yaml`, and platform session files. For example, a paired WhatsApp setup
+needs the data directory that contains `whatsapp/session/creds.json` and
+`WHATSAPP_ENABLED=true` in `.env`.
 
 Once configured, run the container in the background as a persistent gateway (Telegram, Discord, Slack, WhatsApp, etc.):
 
@@ -147,6 +219,26 @@ hermes docker chat
 hermes docker continue
 hermes docker resume <session-id-or-title>
 ```
+
+Those commands create one-shot interactive containers. To attach a TUI to an
+already-running gateway container instead, use `exec`:
+
+```sh
+hermes docker exec
+hermes docker exec -- --continue
+hermes docker exec -- --resume <session-id-or-title>
+```
+
+If the gateway was started with a custom data directory or explicit name, use
+the same selector with `exec`:
+
+```sh
+hermes docker exec --data-dir /path/to/hermes-data
+hermes docker exec --name hermes-work
+```
+
+Everything after `--` is passed to `hermes` inside the container. The default
+`exec` command runs `hermes --tui`.
 
 To open an interactive chat session against a running data directory:
 
@@ -319,6 +411,10 @@ The official image is based on `debian:13.4` and includes:
 - Python 3 with all Hermes dependencies (`uv pip install -e ".[all]"`)
 - Node.js + npm (for browser automation and WhatsApp bridge)
 - Playwright with Chromium (`npx playwright install --with-deps chromium --only-shell`)
+- Browser dashboard and TUI assets are built into the image. The image exports
+  `HERMES_TUI_DIR=/opt/hermes/ui-tui` so `hermes --tui` runs the prebuilt bundle
+  instead of trying to rebuild `/opt/hermes/ui-tui/dist/entry.js` at runtime
+  after UID/GID remapping.
 - ripgrep, ffmpeg, git, and `xz-utils` as system utilities
 - **`docker-cli`** — so agents running inside the container can drive the host's Docker daemon (bind-mount `/var/run/docker.sock` to opt in) for `docker build`, `docker run`, container inspection, etc.
 - **`openssh-client`** — enables the [SSH terminal backend](/user-guide/configuration#ssh-backend) from inside the container. The SSH backend shells out to the system `ssh` binary; without this, it failed silently in containerized installs.

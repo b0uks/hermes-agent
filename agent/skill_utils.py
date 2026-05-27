@@ -224,13 +224,14 @@ def _normalize_string_set(values) -> Set[str]:
 
 # ── External skills directories ──────────────────────────────────────────
 
-# (config_path_str, mtime_ns) -> resolved external dirs list.  Keyed by
-# mtime_ns so a config.yaml edit mid-run is picked up automatically;
+# (config_path_str, mtime_ns, env_dirs) -> resolved external dirs list.  Keyed by
+# mtime_ns and HERMES_EXTERNAL_SKILLS_DIRS so a config.yaml edit or Docker
+# launcher env change mid-run is picked up automatically;
 # otherwise every call would re-read + re-YAML-parse the 15KB config,
 # which becomes the dominant cost of ``hermes`` startup when ~120 skills
 # each trigger a category lookup during banner construction (10+ seconds
 # of pure waste).
-_EXTERNAL_DIRS_CACHE: Dict[Tuple[str, int], List[Path]] = {}
+_EXTERNAL_DIRS_CACHE: Dict[Tuple[str, int, str], List[Path]] = {}
 
 
 def _external_dirs_cache_clear() -> None:
@@ -239,11 +240,13 @@ def _external_dirs_cache_clear() -> None:
 
 
 def get_external_skills_dirs() -> List[Path]:
-    """Read ``skills.external_dirs`` from config.yaml and return validated paths.
+    """Read external skills directories from config/env and return valid paths.
 
-    Each entry is expanded (``~`` and ``${VAR}``) and resolved to an absolute
-    path.  Only directories that actually exist are returned.  Duplicates and
-    paths that resolve to the local ``~/.hermes/skills/`` are silently skipped.
+    Reads ``skills.external_dirs`` from config.yaml plus
+    ``HERMES_EXTERNAL_SKILLS_DIRS`` (``os.pathsep``-separated). Each entry is
+    expanded (``~`` and ``${VAR}``) and resolved to an absolute path.  Only
+    directories that actually exist are returned.  Duplicates and paths that
+    resolve to the local ``~/.hermes/skills/`` are silently skipped.
 
     Cached in-process, keyed on ``config.yaml`` mtime — the function is
     called once per skill during banner / tool-registry scans, and YAML
@@ -251,44 +254,46 @@ def get_external_skills_dirs() -> List[Path]:
     when the cache is absent.
     """
     config_path = get_config_path()
-    if not config_path.exists():
-        return []
+    env_dirs = os.getenv("HERMES_EXTERNAL_SKILLS_DIRS", "")
 
-    # Cache key: (absolute path, mtime_ns).  stat() is ~2us vs ~85ms for
-    # the full YAML parse, so the fast path is nearly free.
+    # stat() is ~2us vs ~85ms for the full YAML parse, so the fast path is
+    # nearly free. Include env_dirs because the Docker launcher can inject
+    # external skills without editing config.yaml.
     try:
         stat = config_path.stat()
-        cache_key: Tuple[str, int] = (str(config_path), stat.st_mtime_ns)
+        mtime_ns = stat.st_mtime_ns
     except OSError:
-        cache_key = None  # type: ignore[assignment]
+        mtime_ns = -1
 
-    if cache_key is not None:
-        cached = _EXTERNAL_DIRS_CACHE.get(cache_key)
-        if cached is not None:
-            # Return a copy so callers can't mutate the cached list.
-            return list(cached)
+    cache_key: Tuple[str, int, str] = (str(config_path), mtime_ns, env_dirs)
 
-    try:
-        parsed = yaml_load(config_path.read_text(encoding="utf-8"))
-    except Exception:
-        return []
-    if not isinstance(parsed, dict):
-        return []
+    cached = _EXTERNAL_DIRS_CACHE.get(cache_key)
+    if cached is not None:
+        # Return a copy so callers can't mutate the cached list.
+        return list(cached)
 
-    skills_cfg = parsed.get("skills")
-    if not isinstance(skills_cfg, dict):
-        return []
+    raw_dirs = []
+    if config_path.exists():
+        try:
+            parsed = yaml_load(config_path.read_text(encoding="utf-8"))
+        except Exception:
+            parsed = None
+        if isinstance(parsed, dict):
+            skills_cfg = parsed.get("skills")
+            if isinstance(skills_cfg, dict):
+                configured = skills_cfg.get("external_dirs")
+                if isinstance(configured, str):
+                    raw_dirs.append(configured)
+                elif isinstance(configured, list):
+                    raw_dirs.extend(configured)
 
-    raw_dirs = skills_cfg.get("external_dirs")
+    if env_dirs:
+        raw_dirs.extend(item for item in env_dirs.split(os.pathsep) if item)
+
     if not raw_dirs:
         result: List[Path] = []
-        if cache_key is not None:
-            _EXTERNAL_DIRS_CACHE[cache_key] = list(result)
+        _EXTERNAL_DIRS_CACHE[cache_key] = list(result)
         return result
-    if isinstance(raw_dirs, str):
-        raw_dirs = [raw_dirs]
-    if not isinstance(raw_dirs, list):
-        return []
 
     from hermes_constants import get_hermes_home
 
@@ -319,8 +324,7 @@ def get_external_skills_dirs() -> List[Path]:
         else:
             logger.debug("External skills dir does not exist, skipping: %s", p)
 
-    if cache_key is not None:
-        _EXTERNAL_DIRS_CACHE[cache_key] = list(result)
+    _EXTERNAL_DIRS_CACHE[cache_key] = list(result)
     return result
 
 

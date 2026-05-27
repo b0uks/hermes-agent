@@ -234,6 +234,11 @@ skills:
 
 Paths support `~` expansion and `${VAR}` environment variable substitution.
 
+Docker launcher note: `hermes docker <command> --skills-dir <host-dir>` mounts
+the host directory read-only and sets `HERMES_EXTERNAL_SKILLS_DIRS` to the
+in-container path automatically. You do not need to edit `config.yaml` for that
+container.
+
 ### How it works
 
 - **Create locally, update in place**: New agent-created skills are written to `~/.hermes/skills/`. Existing skills are modified where they are found, including skills under `external_dirs`, when the agent uses `skill_manage` actions such as `patch`, `edit`, `write_file`, `remove_file`, or `delete`.

@@ -61,6 +61,67 @@ def test_common_flags_add_extra_volumes(tmp_path, monkeypatch, capsys):
     assert "-v /host/penny:/opt/penny" in out
 
 
+def test_skills_dir_mounts_read_only_and_sets_external_dirs_env(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(docker_launcher.shutil, "which", lambda name: "docker")
+    skills_dir = tmp_path / "claude skills"
+    skills_dir.mkdir()
+    expected_container = (
+        docker_launcher.EXTERNAL_SKILLS_ROOT
+        + "/claude-skills-"
+        + docker_launcher.hashlib.sha1(str(skills_dir.resolve()).encode("utf-8")).hexdigest()[:8]
+    )
+
+    code = docker_launcher.main(
+        [
+            "chat",
+            "--data-dir",
+            str(tmp_path / ".hermes"),
+            "--skills-dir",
+            str(skills_dir),
+            "--dry-run",
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert f"-v '{skills_dir.resolve()}:{expected_container}:ro'" in out
+    assert f"-e HERMES_EXTERNAL_SKILLS_DIRS={expected_container}" in out
+
+
+def test_skills_dir_combines_with_user_external_dirs_env(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(docker_launcher.shutil, "which", lambda name: "docker")
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    expected_container = (
+        docker_launcher.EXTERNAL_SKILLS_ROOT
+        + "/skills-"
+        + docker_launcher.hashlib.sha1(str(skills_dir.resolve()).encode("utf-8")).hexdigest()[:8]
+    )
+
+    code = docker_launcher.main(
+        [
+            "chat",
+            "--data-dir",
+            str(tmp_path / ".hermes"),
+            "--skills-dir",
+            str(skills_dir),
+            "-e",
+            "HERMES_EXTERNAL_SKILLS_DIRS=/already/in/container",
+            "--dry-run",
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert (
+        f"-e HERMES_EXTERNAL_SKILLS_DIRS={expected_container}:/already/in/container"
+        in out
+    )
+    assert out.count("HERMES_EXTERNAL_SKILLS_DIRS") == 1
+
+
 def test_continue_dry_run_wraps_latest_session_resume(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(docker_launcher.shutil, "which", lambda name: "docker")
 

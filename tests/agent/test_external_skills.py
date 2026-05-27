@@ -82,6 +82,47 @@ class TestGetExternalSkillsDirs:
             result = get_external_skills_dirs()
         assert result == []
 
+    def test_env_external_dirs_work_without_config(self, hermes_home, external_skills_dir):
+        with patch.dict(
+            os.environ,
+            {
+                "HERMES_HOME": str(hermes_home),
+                "HERMES_EXTERNAL_SKILLS_DIRS": str(external_skills_dir),
+            },
+        ):
+            from agent.skill_utils import (
+                _external_dirs_cache_clear,
+                get_external_skills_dirs,
+            )
+
+            _external_dirs_cache_clear()
+            result = get_external_skills_dirs()
+
+        assert result == [external_skills_dir.resolve()]
+
+    def test_env_external_dirs_append_to_config(self, hermes_home, external_skills_dir, tmp_path):
+        env_dir = tmp_path / "env-skills"
+        env_dir.mkdir()
+        (hermes_home / "config.yaml").write_text(
+            f"skills:\n  external_dirs:\n    - {external_skills_dir}\n"
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "HERMES_HOME": str(hermes_home),
+                "HERMES_EXTERNAL_SKILLS_DIRS": str(env_dir),
+            },
+        ):
+            from agent.skill_utils import (
+                _external_dirs_cache_clear,
+                get_external_skills_dirs,
+            )
+
+            _external_dirs_cache_clear()
+            result = get_external_skills_dirs()
+
+        assert result == [external_skills_dir.resolve(), env_dir.resolve()]
+
     def test_string_value_converted_to_list(self, hermes_home, external_skills_dir):
         (hermes_home / "config.yaml").write_text(
             f"skills:\n  external_dirs: {external_skills_dir}\n"

@@ -555,6 +555,9 @@ skills:
   # external_dirs:
   #   - ~/.agents/skills
   #   - /home/shared/team-skills
+  #
+  # Containers can also receive one-off external dirs from the Docker launcher:
+  #   hermes docker chat --skills-dir ~/.claude/skills
 
 # =============================================================================
 # Agent Behavior

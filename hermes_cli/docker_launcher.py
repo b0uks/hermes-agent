@@ -25,6 +25,7 @@ DEFAULT_GATEWAY_PORT = 8642
 DEFAULT_DASHBOARD_PORT = 9119
 DEFAULT_TUI_DIR = "/opt/hermes/ui-tui"
 DEFAULT_INSTALL_METHOD = "docker"
+EXTERNAL_SKILLS_ROOT = "/opt/hermes-external-skills"
 SKIP_PROFILE_GATEWAY_RECONCILE = "HERMES_SKIP_PROFILE_GATEWAY_RECONCILE=1"
 
 
@@ -104,10 +105,42 @@ def _name(args: argparse.Namespace, *, role: str = "gateway") -> str:
     return args.name or generate_container_name(args.data_dir, role=role)
 
 
+def _env_key(item: str) -> str:
+    return item.split("=", 1)[0]
+
+
+def _env_value(item: str) -> str:
+    return item.split("=", 1)[1] if "=" in item else ""
+
+
+def _external_skills_mounts(
+    args: argparse.Namespace,
+) -> tuple[list[str], list[str]]:
+    mounts: list[str] = []
+    container_dirs: list[str] = []
+    seen: set[Path] = set()
+    for raw in args.skills_dir or []:
+        host = Path(raw).expanduser()
+        resolved = host.resolve()
+        if not args.dry_run and not resolved.is_dir():
+            print(f"Error: external skills dir not found: {resolved}", file=sys.stderr)
+            sys.exit(1)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        slug = _sanitize_name(resolved.name or "skills")
+        digest = hashlib.sha1(str(resolved).encode("utf-8")).hexdigest()[:8]
+        container_dir = f"{EXTERNAL_SKILLS_ROOT}/{slug}-{digest}"
+        mounts.append(f"{resolved}:{container_dir}:ro")
+        container_dirs.append(container_dir)
+    return mounts, container_dirs
+
+
 def _base_run_args(args: argparse.Namespace, *, interactive: bool, name: str) -> list[str]:
     data_dir = _ensure_data_dir(Path(args.data_dir))
     flags = ["-it", "--rm"] if interactive else ["-d"]
     user_env = list(args.env or [])
+    skill_mounts, skill_dirs = _external_skills_mounts(args)
     cmd = [
         _docker(dry_run=args.dry_run),
         "run",
@@ -120,9 +153,24 @@ def _base_run_args(args: argparse.Namespace, *, interactive: bool, name: str) ->
     ]
     for item in args.volume or []:
         cmd.extend(["-v", item])
-    if not any(item.split("=", 1)[0] == "HERMES_INSTALL_METHOD" for item in user_env):
+    for item in skill_mounts:
+        cmd.extend(["-v", item])
+
+    existing_external_skill_dirs = [
+        _env_value(item)
+        for item in user_env
+        if _env_key(item) == "HERMES_EXTERNAL_SKILLS_DIRS"
+    ]
+    if skill_dirs or existing_external_skill_dirs:
+        combined = ":".join([*skill_dirs, *existing_external_skill_dirs])
+        cmd.extend(["-e", f"HERMES_EXTERNAL_SKILLS_DIRS={combined}"])
+        user_env = [
+            item for item in user_env if _env_key(item) != "HERMES_EXTERNAL_SKILLS_DIRS"
+        ]
+
+    if not any(_env_key(item) == "HERMES_INSTALL_METHOD" for item in user_env):
         cmd.extend(["-e", f"HERMES_INSTALL_METHOD={DEFAULT_INSTALL_METHOD}"])
-    if not any(item.split("=", 1)[0] == "HERMES_TUI_DIR" for item in user_env):
+    if not any(_env_key(item) == "HERMES_TUI_DIR" for item in user_env):
         cmd.extend(["-e", f"HERMES_TUI_DIR={DEFAULT_TUI_DIR}"])
     for item in user_env:
         cmd.extend(["-e", item])
@@ -305,6 +353,15 @@ def _add_common_flags(parser: argparse.ArgumentParser) -> None:
         action="append",
         metavar="HOST:CONTAINER[:MODE]",
         help="Additional Docker bind mount for docker run (repeatable)",
+    )
+    parser.add_argument(
+        "--skills-dir",
+        action="append",
+        metavar="HOST_DIR",
+        help=(
+            "Host skills directory to mount read-only and expose as an "
+            "external Hermes skills dir (repeatable)"
+        ),
     )
     parser.add_argument(
         "--dry-run",
