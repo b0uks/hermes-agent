@@ -27,6 +27,8 @@ DEFAULT_TUI_DIR = "/opt/hermes/ui-tui"
 DEFAULT_INSTALL_METHOD = "docker"
 EXTERNAL_SKILLS_ROOT = "/opt/hermes-external-skills"
 SKIP_PROFILE_GATEWAY_RECONCILE = "HERMES_SKIP_PROFILE_GATEWAY_RECONCILE=1"
+GH_CONFIG_CONTAINER_DIR = "/opt/hermes-host-gh-config"
+GH_AUTH_ENV_KEYS = ("GH_TOKEN", "GITHUB_TOKEN")
 
 
 def _default_data_dir() -> Path:
@@ -113,6 +115,66 @@ def _env_value(item: str) -> str:
     return item.split("=", 1)[1] if "=" in item else ""
 
 
+def _has_env_key(items: Sequence[str], key: str) -> bool:
+    return any(_env_key(item) == key for item in items)
+
+
+def _host_gh_config_dir() -> Path:
+    override = os.environ.get("GH_CONFIG_DIR")
+    if override:
+        return Path(override).expanduser()
+    xdg_config = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_config:
+        return Path(xdg_config).expanduser() / "gh"
+    return Path("~/.config/gh").expanduser()
+
+
+def _add_gh_auth_args(
+    cmd: list[str],
+    args: argparse.Namespace,
+    user_env: Sequence[str],
+) -> None:
+    if not getattr(args, "gh_auth", False):
+        return
+
+    token_env_keys = [
+        key
+        for key in GH_AUTH_ENV_KEYS
+        if os.environ.get(key) and not _has_env_key(user_env, key)
+    ]
+    host_config = _host_gh_config_dir()
+    host_config_available = args.dry_run or host_config.is_dir()
+
+    if not host_config_available and not token_env_keys:
+        print(
+            "Error: --gh-auth requested but no GitHub CLI config directory "
+            f"was found at {host_config} and neither GH_TOKEN nor GITHUB_TOKEN "
+            "is set in the host environment.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    container_config = GH_CONFIG_CONTAINER_DIR
+    user_gh_config = next(
+        (
+            _env_value(item)
+            for item in user_env
+            if _env_key(item) == "GH_CONFIG_DIR" and _env_value(item)
+        ),
+        "",
+    )
+    if user_gh_config.startswith("/"):
+        container_config = user_gh_config
+
+    if host_config_available:
+        cmd.extend(["-v", f"{host_config.resolve()}:{container_config}:ro"])
+        if not _has_env_key(user_env, "GH_CONFIG_DIR"):
+            cmd.extend(["-e", f"GH_CONFIG_DIR={container_config}"])
+
+    for key in token_env_keys:
+        cmd.extend(["-e", key])
+
+
 def _external_skills_mounts(
     args: argparse.Namespace,
 ) -> tuple[list[str], list[str]]:
@@ -155,6 +217,8 @@ def _base_run_args(args: argparse.Namespace, *, interactive: bool, name: str) ->
         cmd.extend(["-v", item])
     for item in skill_mounts:
         cmd.extend(["-v", item])
+
+    _add_gh_auth_args(cmd, args, user_env)
 
     existing_external_skill_dirs = [
         _env_value(item)
@@ -212,6 +276,12 @@ def cmd_gateway(args: argparse.Namespace) -> int:
             if code != 0:
                 return code
         print(f"Hermes gateway container {action}: {name}")
+        if args.gh_auth:
+            print(
+                "Note: --gh-auth only applies when creating a container. "
+                "Remove and recreate this gateway if it was launched without "
+                "GitHub auth mounted."
+            )
         return 0
 
     cmd = _base_run_args(args, interactive=False, name=name)
@@ -364,6 +434,14 @@ def _add_common_flags(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--gh-auth",
+        action="store_true",
+        help=(
+            "Expose host GitHub CLI auth to the container by mounting "
+            "gh config read-only and forwarding GH_TOKEN/GITHUB_TOKEN if set"
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print the docker command instead of running it",
@@ -443,14 +521,22 @@ def build_parser(prog: str = "hermes docker") -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser("hermes-docker")
     args = parser.parse_args(list(argv) if argv is not None else None)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+        return 130
 
 
 def command_main(args: argparse.Namespace) -> int:
     argv = getattr(args, "docker_args", None)
     parser = build_parser("hermes docker")
     parsed = parser.parse_args(list(argv or []))
-    return parsed.func(parsed)
+    try:
+        return parsed.func(parsed)
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+        return 130
 
 
 if __name__ == "__main__":

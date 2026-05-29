@@ -76,6 +76,18 @@ hermes docker gateway \
   -v ~/work/project:/workspace/project
 ```
 
+To reuse your host GitHub CLI login inside the container, add `--gh-auth`.
+This mounts your host `gh` config read-only and forwards `GH_TOKEN` /
+`GITHUB_TOKEN` from the host if either is set:
+
+```sh
+hermes docker gateway --gh-auth
+hermes docker chat --gh-auth
+```
+
+If the gateway container already exists, remove and recreate it for new
+Docker run flags like `--gh-auth` to take effect.
+
 For local images built from a branch, pass `--image <tag>`:
 
 ```sh
@@ -139,10 +151,90 @@ external skills directory, and mounts local repos that MCP servers may need:
 hermes docker gateway \
   --data-dir ~/hermes-data \
   --image hermes-agent:docker-fork \
+  --gh-auth \
   --skills-dir ~/.claude/skills \
   -v ~/repos/penny:/opt/data/workspace/repos/penny \
   -v ~/repos/penny-otto:/opt/data/workspace/repos/penny-otto \
   --dashboard --dashboard-tui
+```
+
+If you changed Hermes source and need to refresh the local development image,
+rebuild it from the repo root before launching:
+
+```sh
+docker build -t hermes-agent:docker-fork .
+```
+
+To let agents commit and push from mounted host checkouts, mount the real repo
+and your host SSH directory. Mount SSH credentials read-only; do not copy
+private keys into the image or the data volume:
+
+```sh
+hermes docker gateway \
+  --data-dir ~/hermes-data \
+  --image hermes-agent:docker-fork \
+  --gh-auth \
+  --skills-dir ~/.claude/skills \
+  -v ~/repos/penny:/opt/data/workspace/repos/penny \
+  -v ~/repos/penny-otto:/opt/data/workspace/repos/penny-otto \
+  -v ~/repos/otto:/opt/data/workspace/repos/otto \
+  -v ~/.ssh:/Users/adamb/.ssh:ro \
+  -v ~/.colima:/Users/adamb/.colima:ro \
+  --dashboard --dashboard-tui
+```
+
+If your `~/.ssh/config` includes other host-side files, mount those paths too.
+The `~/.colima` mount above is only needed when your SSH config includes a
+Colima-generated file.
+
+If the host-side `hermes docker ...` launcher cannot start because its Python
+virtualenv is not readable, use the equivalent raw Docker command:
+
+```sh
+docker rm -f hermes-hermes-data-b306ecbb 2>/dev/null || true
+docker run -d \
+  --name hermes-hermes-data-b306ecbb \
+  -v ~/hermes-data:/opt/data \
+  -e HERMES_UID="$(id -u)" \
+  -e HERMES_GID="$(id -g)" \
+  -v ~/repos/penny:/opt/data/workspace/repos/penny \
+  -v ~/repos/penny-otto:/opt/data/workspace/repos/penny-otto \
+  -v ~/repos/otto:/opt/data/workspace/repos/otto \
+  -v ~/.config/gh:/opt/hermes-host-gh-config:ro \
+  -e GH_CONFIG_DIR=/opt/hermes-host-gh-config \
+  -v ~/.ssh:/Users/adamb/.ssh:ro \
+  -v ~/.colima:/Users/adamb/.colima:ro \
+  -v ~/.claude/skills:/opt/hermes-external-skills/skills-6d951f09:ro \
+  -e HERMES_EXTERNAL_SKILLS_DIRS=/opt/hermes-external-skills/skills-6d951f09 \
+  -e HERMES_INSTALL_METHOD=docker \
+  -e HERMES_TUI_DIR=/opt/hermes/ui-tui \
+  --restart unless-stopped \
+  -p 8642:8642 \
+  -p 9119:9119 \
+  -e HERMES_DASHBOARD=1 \
+  -e HERMES_DASHBOARD_TUI=1 \
+  hermes-agent:docker-fork gateway run
+```
+
+Configure Git inside the container once for the mounted data directory. Use the
+SSH key accepted by your Git remote:
+
+```sh
+docker exec hermes-hermes-data-b306ecbb sh -lc '
+git config --global user.name "Adam Bouker" &&
+git config --global user.email "adam_bouker@trendmicro.com" &&
+git config --global core.sshCommand "ssh -i /Users/adamb/.ssh/gh_dsgithub_2026 -o IdentitiesOnly=yes -o UserKnownHostsFile=/Users/adamb/.ssh/known_hosts" &&
+git config --global --add safe.directory /opt/data/workspace/repos/otto
+'
+```
+
+Verify non-destructively:
+
+```sh
+docker exec hermes-hermes-data-b306ecbb sh -lc '
+git -C /opt/data/workspace/repos/otto status --short --branch &&
+git -C /opt/data/workspace/repos/otto ls-remote --symref origin HEAD
+'
 ```
 
 Attach a TUI to that same gateway container:

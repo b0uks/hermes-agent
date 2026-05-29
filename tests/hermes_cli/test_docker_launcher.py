@@ -1,4 +1,7 @@
 from argparse import Namespace
+
+import pytest
+
 from hermes_cli import docker_launcher
 
 
@@ -59,6 +62,79 @@ def test_common_flags_add_extra_volumes(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert "-v /host/penny:/opt/penny" in out
+
+
+def test_gh_auth_mounts_host_gh_config(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(docker_launcher.shutil, "which", lambda name: "docker")
+    host_home = tmp_path / "home"
+    gh_config = host_home / ".config" / "gh"
+    gh_config.mkdir(parents=True)
+    (gh_config / "hosts.yml").write_text("github.com:\n  user: test\n")
+    monkeypatch.setenv("HOME", str(host_home))
+    monkeypatch.delenv("GH_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+    code = docker_launcher.main(
+        [
+            "chat",
+            "--data-dir",
+            str(tmp_path / ".hermes"),
+            "--gh-auth",
+            "--dry-run",
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert (
+        f"-v {gh_config.resolve()}:{docker_launcher.GH_CONFIG_CONTAINER_DIR}:ro"
+        in out
+    )
+    assert f"-e GH_CONFIG_DIR={docker_launcher.GH_CONFIG_CONTAINER_DIR}" in out
+
+
+def test_gh_auth_forwards_host_token_without_printing_value(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(docker_launcher.shutil, "which", lambda name: "docker")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("GH_TOKEN", "ghp_super_secret")
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+    code = docker_launcher.main(
+        [
+            "chat",
+            "--data-dir",
+            str(tmp_path / ".hermes"),
+            "--gh-auth",
+            "--dry-run",
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "-e GH_TOKEN" in out
+    assert "ghp_super_secret" not in out
+
+
+def test_gh_auth_errors_without_config_or_token(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(docker_launcher.shutil, "which", lambda name: "docker")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("GH_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+    with pytest.raises(SystemExit) as exc:
+        docker_launcher.main(
+            ["chat", "--data-dir", str(tmp_path / ".hermes"), "--gh-auth"]
+        )
+
+    err = capsys.readouterr().err
+    assert exc.value.code == 1
+    assert "--gh-auth requested" in err
 
 
 def test_skills_dir_mounts_read_only_and_sets_external_dirs_env(
@@ -178,6 +254,40 @@ def test_command_main_supports_hermes_docker_subcommand(tmp_path, monkeypatch, c
     assert "--tui --model gpt-test" in out
 
 
+def test_main_handles_keyboard_interrupt(monkeypatch, capsys):
+    def raise_interrupt(args):
+        raise KeyboardInterrupt
+
+    parser = docker_launcher.build_parser()
+    parsed = parser.parse_args(["status"])
+    parsed.func = raise_interrupt
+    monkeypatch.setattr(docker_launcher, "build_parser", lambda prog: parser)
+    monkeypatch.setattr(parser, "parse_args", lambda argv: parsed)
+
+    code = docker_launcher.main(["status"])
+
+    err = capsys.readouterr().err
+    assert code == 130
+    assert "Interrupted." in err
+
+
+def test_command_main_handles_keyboard_interrupt(monkeypatch, capsys):
+    def raise_interrupt(args):
+        raise KeyboardInterrupt
+
+    parser = docker_launcher.build_parser()
+    parsed = parser.parse_args(["status"])
+    parsed.func = raise_interrupt
+    monkeypatch.setattr(docker_launcher, "build_parser", lambda prog: parser)
+    monkeypatch.setattr(parser, "parse_args", lambda argv: parsed)
+
+    code = docker_launcher.command_main(Namespace(docker_args=["status"]))
+
+    err = capsys.readouterr().err
+    assert code == 130
+    assert "Interrupted." in err
+
+
 def test_gateway_does_not_skip_profile_gateway_reconcile(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(docker_launcher.shutil, "which", lambda name: "docker")
 
@@ -188,6 +298,23 @@ def test_gateway_does_not_skip_profile_gateway_reconcile(tmp_path, monkeypatch, 
     out = capsys.readouterr().out
     assert code == 0
     assert "HERMES_SKIP_PROFILE_GATEWAY_RECONCILE" not in out
+
+
+def test_gateway_existing_container_warns_gh_auth_is_create_only(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(docker_launcher.shutil, "which", lambda name: "docker")
+    monkeypatch.setattr(docker_launcher, "_container_exists", lambda name: True)
+    monkeypatch.setattr(docker_launcher, "_container_running", lambda name: True)
+
+    code = docker_launcher.main(
+        ["gateway", "--data-dir", str(tmp_path / ".hermes"), "--gh-auth"]
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "container running" in out
+    assert "--gh-auth only applies when creating a container" in out
 
 
 def test_user_env_can_override_tui_dir(tmp_path, monkeypatch, capsys):
