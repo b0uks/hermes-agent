@@ -219,3 +219,41 @@ def test_run_stdio_malware_check_times_out_fail_open():
         assert elapsed < 1.0, f"startup did not fail-open promptly ({elapsed:.1f}s)"
 
     asyncio.run(_test())
+
+
+def test_keepalive_skips_while_tool_rpc_in_flight():
+    """Keepalive must not race a long tools/call on the same stdio stream.
+
+    Some stdio MCP servers process tool calls synchronously. If Hermes sends a
+    ping while a long call is in flight, the ping can time out even though the
+    server is healthy, causing Hermes to tear down the active session. The
+    lifecycle loop should skip idle keepalive probes while another client RPC
+    owns the per-server RPC lock.
+    """
+
+    async def _test():
+        server = MCPServerTask("srv")
+        server._config = {"keepalive_interval": 0.01}
+        server.session = SimpleNamespace(
+            send_ping=AsyncMock(),
+            list_tools=AsyncMock(return_value=SimpleNamespace(tools=[])),
+        )
+
+        with patch("tools.mcp_tool._MIN_KEEPALIVE_INTERVAL", 0.01):
+            await server._rpc_lock.acquire()
+            try:
+                waiter = asyncio.create_task(server._wait_for_lifecycle_event())
+                await asyncio.sleep(0.05)
+
+                server.session.send_ping.assert_not_called()
+                server.session.list_tools.assert_not_called()
+
+                server._shutdown_event.set()
+                result = await asyncio.wait_for(waiter, timeout=1.0)
+            finally:
+                if server._rpc_lock.locked():
+                    server._rpc_lock.release()
+
+        assert result == "shutdown"
+
+    asyncio.run(_test())

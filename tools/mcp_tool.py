@@ -1837,29 +1837,34 @@ class MCPServerTask:
         Raises on a genuine connection failure so the caller triggers a
         reconnect; returns normally when the session is alive.
         """
-        if not self._ping_unsupported:
-            try:
-                await asyncio.wait_for(self.session.send_ping(), timeout=30.0)
-                return
-            except Exception as exc:
-                # Only a "method not found" means ping is unsupported. Any
-                # other error (timeout, closed transport, session expired) is
-                # a real liveness failure — propagate so we reconnect.
-                if not _is_method_not_found_error(exc):
-                    raise
-                if not self._advertises_tools():
-                    # No ping, no tools → no cheaper probe to fall back to.
-                    raise
-                self._ping_unsupported = True
-                logger.info(
-                    "MCP server '%s': does not implement the optional 'ping' "
-                    "utility (-32601); using 'list_tools' for keepalive on "
-                    "this connection.",
-                    self.name,
-                )
+        session = self.session
+        if session is None:
+            return
 
-        # Fallback probe for servers without ping support.
-        await asyncio.wait_for(self.session.list_tools(), timeout=30.0)
+        async with self._rpc_lock:
+            if not self._ping_unsupported:
+                try:
+                    await asyncio.wait_for(session.send_ping(), timeout=30.0)
+                    return
+                except Exception as exc:
+                    # Only a "method not found" means ping is unsupported. Any
+                    # other error (timeout, closed transport, session expired) is
+                    # a real liveness failure — propagate so we reconnect.
+                    if not _is_method_not_found_error(exc):
+                        raise
+                    if not self._advertises_tools():
+                        # No ping, no tools → no cheaper probe to fall back to.
+                        raise
+                    self._ping_unsupported = True
+                    logger.info(
+                        "MCP server '%s': does not implement the optional 'ping' "
+                        "utility (-32601); using 'list_tools' for keepalive on "
+                        "this connection.",
+                        self.name,
+                    )
+
+            # Fallback probe for servers without ping support.
+            await asyncio.wait_for(session.list_tools(), timeout=30.0)
 
     async def _wait_for_lifecycle_event(self) -> str:
         """Block until either _shutdown_event or _reconnect_event fires.
@@ -1937,6 +1942,13 @@ class MCPServerTask:
                 # in that case fall back to the pre-ping ``list_tools`` probe
                 # for the rest of this connection rather than reconnect-looping.
                 if self.session:
+                    if self._rpc_lock.locked():
+                        logger.debug(
+                            "MCP server '%s': skipping keepalive while another "
+                            "client RPC is in flight",
+                            self.name,
+                        )
+                        continue
                     try:
                         await self._keepalive_probe()
                     except Exception as exc:
